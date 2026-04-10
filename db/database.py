@@ -8,7 +8,7 @@ from db.models import Base
 
 
 def get_engine():
-    db_path = settings.DB_PATH
+    db_path = settings.db_path
     return create_engine(f"sqlite:///{db_path}", echo=False)
 
 

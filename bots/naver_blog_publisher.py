@@ -40,6 +40,26 @@ class NaverBlogPublisher:
                 return frame
         raise RuntimeError("SmartEditor ONE iframe(mainFrame)을 찾을 수 없습니다.")
 
+    async def _wait_for_editor_frame(self, timeout: int = 30) -> Frame:
+        """에디터 iframe이 나타날 때까지 대기"""
+        for i in range(timeout):
+            for frame in self.page.frames:
+                if "PostWrite" in frame.url or frame.name == "mainFrame":
+                    self.editor_frame = frame
+                    return frame
+            await asyncio.sleep(1)
+        raise RuntimeError("SmartEditor ONE iframe(mainFrame)을 찾을 수 없습니다.")
+
+    async def _human_click(self, element):
+        """요소 영역 내 랜덤 위치 클릭 (iframe 안에서도 안전)"""
+        box = await element.bounding_box()
+        if box:
+            offset_x = random.uniform(box["width"] * 0.2, box["width"] * 0.8)
+            offset_y = random.uniform(box["height"] * 0.25, box["height"] * 0.75)
+            await element.click(position={"x": offset_x, "y": offset_y})
+        else:
+            await element.click()
+
     async def _human_type(self, text: str, delay_range: tuple[int, int] = (5, 15)):
         """인간형 타이핑"""
         for char in text:
@@ -168,7 +188,7 @@ class NaverBlogPublisher:
                 timeout=5000,
             )
             if title_placeholder:
-                await title_placeholder.click()
+                await self._human_click(title_placeholder)
                 await asyncio.sleep(0.5)
 
             # 제목 타이핑
@@ -180,12 +200,40 @@ class NaverBlogPublisher:
             print(f"    placeholder 실패, 폴백 시도: {e}")
             first_p = await frame.query_selector(".se-text-paragraph")
             if first_p:
-                await first_p.click()
+                await self._human_click(first_p)
                 await asyncio.sleep(0.3)
                 await self._human_type(title, delay_range=(10, 25))
 
-        # 본문으로 이동
-        await self.page.keyboard.press("Tab")
+        # 본문으로 이동 — 본문 영역 직접 클릭
+        await asyncio.sleep(0.5)
+        try:
+            # SmartEditor ONE: 본문은 .se-sections 안에 있고, 제목은 .se-documentTitle 안에 있음
+            body_area = await frame.query_selector(".se-sections .se-text-paragraph")
+            if not body_area:
+                body_area = await frame.query_selector(".se-section-content .se-text-paragraph")
+            if not body_area:
+                # 제목 영역(.se-documentTitle) 바깥의 paragraph 찾기
+                body_area = await frame.evaluate_handle("""
+                    () => {
+                        const all = document.querySelectorAll('.se-text-paragraph');
+                        for (const el of all) {
+                            if (!el.closest('.se-documentTitle')) return el;
+                        }
+                        return null;
+                    }
+                """)
+                if await body_area.evaluate("el => el === null"):
+                    body_area = None
+
+            if body_area:
+                await self._human_click(body_area)
+                print("    ✓ 본문 영역 클릭 완료")
+            else:
+                await self.page.keyboard.press("Enter")
+                print("    ⚠ 본문 영역 못 찾음, Enter로 이동")
+        except Exception as e:
+            print(f"    ⚠ 본문 이동 실패({e}), Enter로 이동")
+            await self.page.keyboard.press("Enter")
         await asyncio.sleep(0.5)
 
     async def _input_body(self, frame: Frame, blocks, image_paths: list[Path]):

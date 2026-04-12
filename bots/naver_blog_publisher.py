@@ -41,6 +41,8 @@ class NaverBlogPublisher:
         self.page = page
         self.editor_frame: Frame | None = None
         self.accent_color: str = random.choice(ACCENT_COLORS)
+        self.heading_quote_style: str = "default"  # 테마에서 설정
+        self.body_quote_style: str = "default"      # 테마에서 설정
 
     def _get_editor_frame(self) -> Frame:
         """mainFrame iframe 찾기"""
@@ -164,9 +166,14 @@ class NaverBlogPublisher:
             발행된 글의 URL 또는 None
         """
         # 포맷팅 테마 적용
-        if formatting_theme and formatting_theme.get("accent_color"):
-            self.accent_color = formatting_theme["accent_color"]
-            print(f"  🎨 테마: {formatting_theme.get('name', '?')} / 색상: {self.accent_color}")
+        if formatting_theme:
+            if formatting_theme.get("accent_color"):
+                self.accent_color = formatting_theme["accent_color"]
+            if formatting_theme.get("heading_quote"):
+                self.heading_quote_style = formatting_theme["heading_quote"]
+            if formatting_theme.get("body_quote"):
+                self.body_quote_style = formatting_theme["body_quote"]
+            print(f"  🎨 테마: {formatting_theme.get('name', '?')} / 소제목: {self.heading_quote_style} / 인용: {self.body_quote_style} / 색상: {self.accent_color}")
 
         sequence = parse_markdown(content_md)
         image_paths = image_paths or []
@@ -330,7 +337,10 @@ class NaverBlogPublisher:
                     await self._apply_emphasis(frame, emphasis_phrases)
 
             elif block.type == BlockType.HEADING:
-                heading_style = getattr(block, 'quote_style', 'default') or 'default'
+                # 마크다운에서 지정된 스타일 우선, 없으면 테마 스타일 적용
+                heading_style = getattr(block, 'quote_style', None)
+                if not heading_style or heading_style == 'default':
+                    heading_style = self.heading_quote_style
                 await self._insert_heading(frame, block.text, quote_style=heading_style)
 
             elif block.type == BlockType.IMAGE:
@@ -339,7 +349,9 @@ class NaverBlogPublisher:
                     image_idx += 1
 
             elif block.type == BlockType.QUOTE:
-                q_style = getattr(block, 'quote_style', 'default') or 'default'
+                q_style = getattr(block, 'quote_style', None)
+                if not q_style or q_style == 'default':
+                    q_style = self.body_quote_style
                 await self._insert_quote(frame, block.text, quote_style=q_style)
 
             elif block.type == BlockType.HORIZONTAL_RULE:
@@ -398,8 +410,22 @@ class NaverBlogPublisher:
                 const quotes = document.querySelectorAll('.se-component.se-quotation');
                 const q = quotes[quotes.length - 1];
                 if (!q) return 'no quotation';
-                // 기존 레이아웃 클래스 제거 후 새 스타일 적용
+
+                // 1. 컴포넌트 래퍼의 레이아웃 클래스 변경
                 q.className = q.className.replace(/se-l-[\\w]+/, '{target_class}');
+
+                // 2. data-layout 속성 업데이트 (SmartEditor 내부 상태)
+                q.setAttribute('data-layout', '{target_class}'.replace('se-l-', ''));
+
+                // 3. 내부 se-quotation 컨테이너 클래스도 동기화
+                const inner = q.querySelector('.se-quotation');
+                if (inner) {{
+                    inner.className = inner.className.replace(/se-quotation-[\\w]+/, 'se-quotation-{style}');
+                }}
+
+                // 4. 변경 이벤트 디스패치 (에디터 내부 상태 동기화)
+                q.dispatchEvent(new Event('change', {{bubbles: true}}));
+
                 return 'ok';
             }}
         """)

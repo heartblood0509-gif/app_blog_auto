@@ -31,6 +31,57 @@ class BlogPost:
     content: str
     images: list[bytes] = field(default_factory=list)
     image_markers: list[str] = field(default_factory=list)
+    formatting_theme: dict = field(default_factory=dict)  # 포맷팅 테마 (색상/인용구 스타일)
+
+
+# ---------------------------------------------------------------------------
+# 포맷팅 테마 시스템 — 매 포스트마다 다른 인용구/색상 조합 자동 선택
+# ---------------------------------------------------------------------------
+
+import random as _random
+
+FORMATTING_THEMES = [
+    {
+        "name": "클래식",
+        "heading_quote": "line",       # 소제목 인용구 스타일
+        "body_quote": "bubble",        # 본문 인용구 스타일
+        "accent_color": "rgb(255, 95, 69)",  # 주황빨강
+        "use_hr": False,
+    },
+    {
+        "name": "모던",
+        "heading_quote": "underline",
+        "body_quote": "default",
+        "accent_color": "rgb(0, 78, 130)",   # 진파랑
+        "use_hr": True,
+    },
+    {
+        "name": "다이내믹",
+        "heading_quote": "underline",
+        "body_quote": "bubble",
+        "accent_color": "rgb(186, 0, 0)",    # 진빨강
+        "use_hr": True,
+    },
+    {
+        "name": "프로페셔널",
+        "heading_quote": "corner",
+        "body_quote": "bubble",
+        "accent_color": "rgb(0, 120, 203)",  # 파랑
+        "use_hr": False,
+    },
+    {
+        "name": "내추럴",
+        "heading_quote": "line",
+        "body_quote": "default",
+        "accent_color": "rgb(130, 63, 0)",   # 갈색
+        "use_hr": True,
+    },
+]
+
+
+def pick_formatting_theme() -> dict:
+    """포맷팅 테마 랜덤 선택"""
+    return _random.choice(FORMATTING_THEMES)
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +210,10 @@ def build_analysis_prompt(reference_text: str) -> str:
 - **레퍼런스의 실제 소제목 목록**: 원문에 있는 소제목들을 그대로 나열
 
 ## 🎨 톤 & 스타일
-- **문체**: 구어체/문어체 비율, 말투 특징 (예: "~거든요", "~입니다" 등)
+- **문체**: 구어체/문어체 비율 (예: "90% 구어체 + 10% 문어체")
+- **대표 어미 패턴**: 이 글에서 반복적으로 사용되는 문장 끝 어미를 5개 이상 추출하세요 (예: "~거든요", "~더라고요", "~잖아요", "~했어요", "~인 거죠")
+- **문장 길이**: 한 문장의 평균 글자 수와 호흡 (짧고 리듬감 있는지, 길고 설명적인지)
+- **말투 요약**: 이 글의 말투를 한 줄로 정의하세요 (예: "친한 언니가 카페에서 조언해주는 듯한 다정한 구어체")
 - **제목 패턴**: 제목의 구조와 키워드 배치 방식
 - **감정 표현**: 공감 유도 방식, 과장/절제 정도
 - **타겟 독자층**: 연령대, 관심사, 지식 수준
@@ -181,7 +235,35 @@ def build_analysis_prompt(reference_text: str) -> str:
 ## 🔍 SEO 기본 정보
 - **총 글자 수**: 공백 포함/제외 글자 수
 - **키워드 밀도**: 핵심 키워드와 반복 횟수, 밀도(%)
-- **이미지 패턴**: 이미지 예상 개수와 간격
+
+## 🖼️ 이미지 전략 분석
+이 글에 삽입될 이미지를 상세히 설계하세요. 독자가 스크롤을 멈추고 글에 몰입하게 만드는 시각적 흐름이 목표입니다.
+
+### 이미지 개수 및 간격
+- **권장 이미지 개수**: 글자 수와 소제목 수를 기반으로 산출. 소제목(H2)마다 최소 1장 + 도입부 1장 + 결론부 1장이 기본. 일반적으로 **5~10장**.
+- **배치 간격**: 약 300~500자(공백 제외)마다 1장. 텍스트만 연속되는 구간이 500자를 넘지 않도록.
+
+### 이미지 배치 계획 (서사 구조와 매칭)
+서사 구조의 각 단계에 어떤 이미지가 필요한지 구체적으로 설계하세요. 아래 형식으로 작성:
+
+| 순서 | 서사 단계 | 이미지 역할 | 이미지 설명 (구체적) |
+|------|-----------|-------------|---------------------|
+| 1 | 도입부 (H1 아래) | 첫인상/후킹 | 예: "30대 여성이 거울 앞에서 피부를 걱정스럽게 바라보는 모습, 자연광" |
+| 2 | 2단계 문제 인식 | 공감/상황 묘사 | 예: "건조하고 갈라진 피부 클로즈업, 부드러운 조명" |
+| ... | ... | ... | ... |
+
+### 이미지 유형별 가이드
+이 글에 적합한 이미지 유형을 판단하세요:
+- **감정/상황 묘사**: 주인공의 고민, 일상 장면, 감정 표현 (후기성 글에 적합)
+- **정보 전달**: 비교표, 개념도, 순서도, 체크리스트 (정보성 글에 적합)
+- **제품/소재 클로즈업**: 성분, 텍스처, 패키징 (리뷰/제품 글에 적합)
+- **결과/변화**: 전후 비교, 긍정적 결과 장면 (설득형 글에 적합)
+- **분위기/라이프스타일**: 이상적인 일상, 동경하는 장면 (브랜딩 글에 적합)
+
+### 이미지 톤 가이드
+- **색감**: 따뜻한 톤 / 차가운 톤 / 자연스러운 톤
+- **촬영 느낌**: 셀프 촬영 느낌 / 전문 촬영 느낌 / 일상 스냅 느낌
+- **인물 포함 여부**: 인물 중심 / 사물 중심 / 풍경 중심
 
 결과를 마크다운 형식으로 정리해주세요."""
 
@@ -210,7 +292,7 @@ def build_title_prompt(
 
 ---
 
-### 📝 후기성/경험담 글일 때 (감정 선공형, 결론 선공형, 관리형)
+### 📝 후기성/경험담 글일 때 (감정 선공형, 결론 선공형, 관리형, 신념 제시형)
 주제와 키워드에 맞는 블로그 제목을 **7개** 추천해주세요.
 
 **추가 기준:**
@@ -303,6 +385,7 @@ def build_generation_prompt(
     keywords: str,
     *,
     selected_title: str | None = None,
+    persona: str | None = None,
     product_name: str | None = None,
     product_advantages: str | None = None,
     product_link: str | None = None,
@@ -330,11 +413,34 @@ def build_generation_prompt(
 
     title_instruction = f' - 제목: "{selected_title}"' if selected_title else ""
 
-    image_instruction = (
-        "- 이미지 관련 표시는 아무것도 넣지 마세요"
-        if not include_image_desc
-        else "- 이미지 삽입 위치를 [이미지: 설명] 형태로 표시 (레퍼런스의 이미지 패턴 참고)"
-    )
+    # 페르소나 섹션
+    persona_section = ""
+    if persona:
+        persona_section = f"""
+### 글쓴이 페르소나 (매우 중요)
+이 글은 **"{persona}"**가 직접 쓴 글입니다.
+- 이 사람의 **나이, 성별, 직업, 경험**에 맞는 시선과 관점으로 글 전체를 작성하세요
+- 이 사람이 실제로 겪었을 법한 구체적인 상황, 감정, 에피소드를 만들어내세요
+- 이 사람의 일상 언어, 관심사, 고민이 자연스럽게 녹아들어야 합니다
+- 예를 들어 "32살 여성 직장인, 홍조 고민 5년차"라면: 회사 화장실에서 거울 보며 한숨, 퇴근 후 피부과 예약, 동료의 "얼굴 왜 그래?" 한마디 등"""
+
+    # 이미지 지침
+    if include_image_desc:
+        image_instruction = """- **이미지 삽입 필수** — 위 분석 결과의 "🖼️ 이미지 전략 분석"의 이미지 배치 계획을 반드시 따르세요
+- 분석 결과의 이미지 배치 계획 테이블에 있는 모든 이미지를 빠짐없이 [이미지: 설명] 형태로 삽입하세요
+- [이미지: 설명]의 "설명"은 AI가 이미지를 생성할 수 있도록 **구체적이고 시각적으로** 작성하세요
+  - ❌ 나쁜 예: [이미지: 피부 관리] (너무 추상적)
+  - ❌ 나쁜 예: [이미지: 제품 사진] (무엇을 찍을지 불명확)
+  - ✅ 좋은 예: [이미지: 30대 여성이 세안 후 거울을 보며 피부를 확인하는 모습, 욕실 자연광]
+  - ✅ 좋은 예: [이미지: 피부 보습 전후 비교 - 왼쪽 건조/각질, 오른쪽 촉촉/윤기]
+  - ✅ 좋은 예: [이미지: 나무 테이블 위에 스킨케어 제품 3개가 나란히 놓인 미니멀한 구도, 부드러운 조명]
+- 각 이미지는 바로 위아래 문단의 내용과 직접적으로 연관되어야 합니다
+- **[이미지: 설명] 위아래에 반드시 빈 줄을 1줄씩 넣어** 글과 이미지 사이에 여백을 확보하세요
+- 텍스트만 연속되는 구간이 500자(공백 제외)를 넘지 않도록 이미지를 배치하세요
+- H1 제목 바로 아래에 첫 번째 이미지를 반드시 배치하세요
+- 각 H2 소제목 아래에도 해당 섹션을 대표하는 이미지를 1장 이상 배치하세요"""
+    else:
+        image_instruction = "- 이미지 관련 표시는 아무것도 넣지 마세요"
 
     # 제품 배치 규칙
     product_rules = ""
@@ -416,6 +522,7 @@ def build_generation_prompt(
 ## 작성 요청
 - **주제**: {topic}
 - **키워드**: {keywords}
+{f'- **글쓴이 페르소나**: {persona}' if persona else ''}
 {product_section}
 {f'- **추가 요구사항**: {requirements}' if requirements else ''}
 
@@ -424,11 +531,19 @@ def build_generation_prompt(
 레퍼런스 글의 문장을 그대로 복사하거나 살짝 바꿔 쓰지 마세요. 내용은 100% 새로 작성하되, 분석된 톤 앤 매너와 섹션 구조를 따르세요.
 중학생도 쉽게 읽힐 수 있도록 어려운 전문 용어는 피하세요.
 
+### 말투·문체 규칙 (매우 중요 — 반드시 준수)
+위 분석 결과의 "🎨 톤 & 스타일" 항목을 확인하고, 그 말투를 **글 전체에 일관되게** 적용하세요.
+- **구어체/문어체 비율**을 레퍼런스와 동일하게 유지하세요
+- **어미 패턴**을 레퍼런스와 동일하게 사용하세요 (예: 레퍼런스가 "~거든요", "~더라고요" 체면 동일한 어미 사용)
+- **문장 길이와 호흡**도 레퍼런스와 비슷하게 맞추세요 (짧고 리듬감 있는 문장 vs 길고 설명적인 문장)
+- 추가 요구사항에 별도의 말투 지정이 있으면 그것을 우선 적용하세요
+{persona_section}
+
 **중요: 위 분석 결과의 "📋 서사 유형"을 확인하고, 아래에서 해당 유형의 작성법을 따르세요.**
 
 ---
 
-### 📝 후기성/경험담 글일 때 (감정 선공형, 결론 선공형, 관리형)
+### 📝 후기성/경험담 글일 때 (감정 선공형, 결론 선공형, 관리형, 신념 제시형)
 스토리텔링이 포함된 경험제로 작성하세요.
 
 **STEP 1) 오프닝 — 첫 15초 안에 잡아라**
@@ -444,8 +559,8 @@ def build_generation_prompt(
 - **오프닝에 제품 언급 절대 금지**: 글을 읽을지 말지 결정하는 중요한 구간에 제품을 언급하는 것은, 소개팅 첫 만남에 "사귀자"고 말하는 것과 같습니다.
 
 **STEP 2) 메리트 — 서사 전개**
-- **소제목(H2) 필수**: 반드시 H2(##) 소제목을 3~5개 포함. 서사 구조의 전환점에 배치하세요.
-- **소제목 앞 여백**: 소제목(H2) 위에 빈 줄 2개를 넣어 시각적으로 구간을 분리하세요
+- **소제목 필수 (3~5개)**: H2(##) 소제목 또는 인용구 소제목(>line>, >underline>) 중 선택하여 서사 구조의 전환점에 배치하세요. 한 글에서 H2와 인용구 소제목을 혼합해도 좋습니다.
+- **소제목 앞 여백**: 소제목 위에 빈 줄 2개를 넣어 시각적으로 구간을 분리하세요
 - **기능제 표현 금지 → 경험제로 전환**: 장점을 직접 나열하지 말고, 사용 경험을 통해 간접적으로 전달하세요.
   ❌ "이 샴푸는 귀리단백질이 함유되어 탈모를 예방합니다"
   ✅ "이 샴푸 써봤는데 사진 보시는대로 이렇게 좋아졌어요. 요즘 유명한 귀리단백질 함유가 높아서인가 봅니다"
@@ -466,8 +581,8 @@ def build_generation_prompt(
 - 오프닝에 제품 언급 금지는 동일합니다.
 
 **STEP 2) 본론 — 정보 계층 구조**
-- **소제목(H2) 필수**: 반드시 H2(##) 소제목을 4~6개 포함. 논리적 전환점(정의→분류→비교→활용→주의사항)에 배치하세요.
-- **소제목 앞 여백**: 소제목(H2) 위에 빈 줄 2개를 넣어 시각적으로 구간을 분리하세요
+- **소제목 필수 (4~6개)**: H2(##) 소제목 또는 인용구 소제목(>line>, >underline>) 중 선택하여 논리적 전환점(정의→분류→비교→활용→주의사항)에 배치하세요.
+- **소제목 앞 여백**: 소제목 위에 빈 줄 2개를 넣어 시각적으로 구간을 분리하세요
 - **팩트와 데이터 중심**: 감정 표현 대신 구체적 정보, 비교, 수치를 사용하세요.
 - **체계적 구성**: 개념 설명 → 종류/유형 분류 → 각 유형 비교 → 선택 기준 → 실제 활용법 → 주의사항 순서로 정리하세요.
 - 필요시 "참고로", "덧붙이자면" 등으로 부가 정보를 자연스럽게 삽입하세요.
@@ -483,6 +598,65 @@ def build_generation_prompt(
 - 모든 문장은 문장 부호 뒤에 줄바꿈. 3~5문장마다 빈 줄로 문단을 구분
 {char_count_instruction}
 {image_instruction}{product_rules}
+
+### 인용구 & 구분선 가독성 지침 (매우 중요)
+블로그 가독성을 높이기 위해 **다양한 인용구 스타일**과 **구분선**을 적극 활용하세요.
+
+**인용구 5종 문법:**
+- `> 텍스트` — 큰따옴표("") 스타일: 핵심 메시지, 대화체 표현에 사용
+- `>bubble> 텍스트` — 말풍선 스타일: 고객/사용자 목소리, Q&A 형태에 사용
+- `>line> 텍스트` — 세로선 스타일: 소제목 대체, 섹션 헤더로 사용
+- `>underline> 텍스트` — 밑줄 스타일: 소제목 대체, 공식적/깔끔한 느낌
+- `>corner> 텍스트` — 모서리 꺾쇠 스타일: 핵심 슬로건, 강력한 강조에 사용
+
+**구분선 문법:**
+- `---` — 큰 섹션 전환 시 사용 (예: 도입부→본론, 본론→마무리 사이)
+
+**사용 규칙:**
+1. **한 글에서 인용구 최소 2종 이상 혼합 사용** (예: 소제목은 >underline>, 고객 대화는 >bubble>)
+2. H2(##) 소제목 대신 인용구를 소제목으로 활용 가능 (>line> 또는 >underline>)
+3. 핵심 문구나 독자의 질문/의문은 인용구로 시각적 강조 (>bubble> 또는 > 사용)
+4. 구분선(---)은 글 전체에서 1~2회만 사용 (남용 금지)
+5. 같은 스타일 인용구를 연속 3회 이상 사용하지 마세요 — 다양성이 핵심
+
+**인용구 활용 예시 (후기성 글):**
+```
+## 모든 것이 달라진 순간
+
+>bubble> "원장님, 진짜 안 아프네요?"
+
+이 말은 제가 진료 중 가장 많이 듣는 말입니다.
+
+---
+
+>underline> 1. 경험이 만드는 차이
+
+제가 10년간 이 분야에서...
+
+>corner> 통증은 적게, 만족은 크게!
+
+> "처음 와봤는데 너무 좋았어요"
+```
+
+### 텍스트 강조 지침
+본문 중 핵심 문구에 색상+굵기 강조를 적용할 수 있습니다.
+
+**강조 문법:**
+- `{{강조}}핵심 문구{{/강조}}` — 해당 문구에 색상+굵기가 자동 적용됩니다
+
+**사용 규칙:**
+1. 한 문단에서 강조는 **1~2개**만 사용 (남용하면 역효과)
+2. 글 전체에서 **5~10개** 정도가 적당
+3. 핵심 키워드, 경고 문구, 수치, 결론적 표현에 사용
+4. 인용구 안에서는 사용하지 마세요 (인용구 자체가 이미 강조)
+
+**예시:**
+```
+간판을 제작할 때 이렇게 {{강조}}가격 맞춰서 알아서 해달라는 말은 굉장히 위험한 발언{{/강조}}이니
+절대 이렇게 의뢰하지 마시길 바랍니다.
+
+사랑니 발치는 {{강조}}최대 20분을 넘지 않아야{{/강조}} 합니다.
+```
 {NAVER_FORBIDDEN_WORDS_SECTION}"""
 
 
@@ -638,10 +812,82 @@ def list_templates() -> list[dict]:
 # 이미지 마커 추출
 # ---------------------------------------------------------------------------
 
+def clean_content(content: str) -> str:
+    """생성된 콘텐츠에서 불필요한 HTML 태그 제거"""
+    # <br> 태그를 빈 줄로 변환
+    content = re.sub(r'<br\s*/?>\s*<br\s*/?>', '\n', content)
+    content = re.sub(r'<br\s*/?>', '\n', content)
+    # 기타 HTML 태그 제거
+    content = re.sub(r'</?[a-zA-Z][^>]*>', '', content)
+    return content
+
+
 def extract_image_markers(content: str) -> list[str]:
     """마크다운 콘텐츠에서 [이미지: 설명] 마커를 추출"""
     pattern = r'\[이미지:\s*(.+?)\]'
     return re.findall(pattern, content)
+
+
+def build_blog_image_prompt(
+    image_description: str,
+    blog_content: str,
+    image_index: int = 0,
+    ratio: str = "16:9",
+) -> str:
+    """블로그 이미지 생성 프롬프트 (App_Blog buildBlogImagePrompt 포팅)"""
+    ratio_guide = (
+        "가로로 넓은 16:9 비율. 네이버 블로그 본문에 최적화된 와이드 이미지."
+        if ratio == "16:9"
+        else "정사각형 1:1 비율. 네이버 블로그 카드뉴스 및 모바일 최적화 이미지."
+    )
+
+    # 이미지 설명 주변의 본문 맥락 추출 (앞뒤 500자)
+    context_snippet = ""
+    for i, m in enumerate(re.finditer(r'\[이미지:\s*[^\]]+\]', blog_content)):
+        if i == image_index:
+            start = max(0, m.start() - 500)
+            end = min(len(blog_content), m.end() + 500)
+            context_snippet = blog_content[start:end]
+            break
+    if not context_snippet:
+        context_snippet = blog_content[:1500]
+
+    diff_line = (
+        "\n8. **이전 이미지와 차별화** — 다른 구도, 다른 앵글, 다른 색감으로 시각적 다양성 확보"
+        if image_index > 0
+        else ""
+    )
+
+    return f"""당신은 네이버 블로그 본문에 삽입할 이미지 전문 디자이너입니다.
+독자가 스크롤을 멈추고 시선을 빼앗기는 고품질 이미지를 1장 생성해주세요.
+
+## 생성할 이미지
+{image_description}
+
+## 이 이미지가 삽입될 본문 맥락
+아래는 이미지가 들어갈 위치 앞뒤의 블로그 본문입니다. 이 맥락에 자연스럽게 어울리는 이미지를 생성하세요.
+---
+{context_snippet}
+---
+
+## 이미지 비율
+{ratio_guide}
+
+## 스타일: 실사 사진 (Photorealistic) — 반드시 준수
+- 반드시 실제 DSLR 카메라로 촬영한 것처럼 사실적인(photorealistic) 이미지를 생성하세요
+- 일러스트, 만화, 애니메이션, 수채화, 디지털 아트 스타일은 절대 금지
+- 모든 이미지가 동일한 실사 사진 스타일로 일관되어야 합니다
+
+## 이미지 품질 기준
+1. **텍스트/글자/워터마크 절대 금지** — 이미지 안에 어떤 문자도 넣지 마세요
+2. **즉각적 시선 유도** — 독자가 스크롤하다 멈출 만큼 시각적으로 매력적이어야 합니다
+3. **본문 맥락과 정확히 일치** — 위 본문에서 설명하는 상황, 감정, 사물을 직접 시각화하세요
+4. **실제 촬영 느낌** — 85mm 포트레이트 렌즈 또는 35mm 광각 렌즈로 촬영한 느낌. 얕은 피사계 심도(배경 블러)
+5. **인물은 반드시 동양인/한국인** — 피부톤, 헤어스타일, 체형 모두 한국인 기준
+6. **조명과 분위기** — 자연광 또는 부드러운 간접 조명. 전체적으로 밝고 따뜻한 톤
+7. **고해상도, 선명한 초점** — 주요 피사체에 선명한 초점, 배경은 자연스럽게 블러{diff_line}
+
+정확히 1장의 완성된 이미지만 생성하세요."""
 
 
 # ---------------------------------------------------------------------------
@@ -755,6 +1001,7 @@ async def analyze_reference(reference_text: str) -> str:
 async def generate_from_keyword(
     keyword: str,
     *,
+    seo_keyword: str | None = None,
     template: str = "review",
     product_name: str | None = None,
     product_advantages: str | None = None,
@@ -762,11 +1009,14 @@ async def generate_from_keyword(
     requirements: str | None = None,
     char_count_range: str | None = None,
     reference_url: str | None = None,
+    generate_images: bool = False,
+    on_progress: callable = None,
 ) -> BlogPost:
     """키워드만으로 완성된 블로그 글 생성
 
     Args:
-        keyword: 메인 키워드 (예: "남이섬 벚꽃 축제")
+        keyword: 글 주제 (예: "탈모샴푸 다 써본사람이 말하는 찐 경험담")
+        seo_keyword: SEO 키워드 (예: "탈모샴푸") — 키워드 밀도 체크용
         template: 내장 템플릿 ID (review, informational, brand-info, brand-intro)
         product_name: 제품명 (선택)
         product_advantages: 제품 장점 (선택)
@@ -774,24 +1024,40 @@ async def generate_from_keyword(
         requirements: 추가 요구사항 (선택)
         char_count_range: 글자 수 범위 (500-1500, 1500-2500, 2500-3500)
         reference_url: 레퍼런스 블로그 URL (선택, 제공 시 크롤링 후 분석)
+        generate_images: True면 Gemini Imagen으로 이미지 자동 생성
+        on_progress: 진행 상황 콜백 (msg: str) -> None
     """
+    total_steps = 6 if generate_images else 5
+
+    def log(msg):
+        print(msg)
+        if on_progress:
+            on_progress(msg)
+
     char_count_range = char_count_range or settings.CHAR_COUNT_RANGE
+
+    # 포맷팅 테마 선택 (매 포스트마다 다른 스타일)
+    theme = pick_formatting_theme()
+    log(f"  📐 포맷팅 테마: {theme['name']} (소제목: {theme['heading_quote']}, 인용구: {theme['body_quote']}, 색상: {theme['accent_color']})")
 
     # Step 1: 분석 결과 준비
     if reference_url:
         from core.naver_crawler import crawl_naver_blog
-        print("[1/5] 레퍼런스 블로그 크롤링 중...")
+        log(f"[1/{total_steps}] 레퍼런스 블로그 크롤링 중...")
         crawl_result = await crawl_naver_blog(reference_url)
-        print("[2/5] 레퍼런스 분석 중...")
+        log(f"[2/{total_steps}] 레퍼런스 분석 중...")
         analysis_result = await analyze_reference(crawl_result["content"])
     else:
-        print("[1/5] 내장 템플릿 로드 중...")
+        log(f"[1/{total_steps}] 내장 템플릿 로드 중...")
         analysis_result = load_template(template)
 
-    # Step 2: 키워드 → 주제 확장
-    print("[2/5] 키워드 확장 중..." if not reference_url else "[3/5] 키워드 확장 중...")
+    # Step 2: 키워드 → 페르소나 확장 (주제는 사용자 입력 그대로 사용)
+    step = 2 if not reference_url else 3
+    log(f"[{step}/{total_steps}] 페르소나 생성 중...")
     topic_info = await expand_keyword(keyword)
-    topic = topic_info.get("topic", keyword)
+    # ★ 사용자가 입력한 keyword(=글 주제)를 그대로 topic으로 사용
+    # expand_keyword가 만든 topic은 무시 (사용자 의도와 다를 수 있음)
+    topic = keyword
 
     # 페르소나 정보를 requirements에 추가
     persona = topic_info.get("persona", {})
@@ -802,15 +1068,15 @@ async def generate_from_keyword(
         requirements = persona_req
 
     # Step 3: 제목 생성
-    step = 3 if not reference_url else 4
-    print(f"[{step}/5] 제목 생성 중...")
+    step += 1
+    log(f"[{step}/{total_steps}] 제목 생성 중...")
     titles = await generate_titles(analysis_result, topic, keyword)
     selected_title = titles[0].title if titles else topic
-    print(f"  → 선택된 제목: {selected_title}")
+    log(f"  → 선택된 제목: {selected_title}")
 
     # Step 4: 본문 생성
     step += 1
-    print(f"[{step}/5] 본문 생성 중...")
+    log(f"[{step}/{total_steps}] 본문 생성 중...")
     content = await generate_content(
         analysis_result,
         topic,
@@ -823,27 +1089,43 @@ async def generate_from_keyword(
         char_count_range=char_count_range,
     )
 
+    # HTML 태그 정리 (<br> 등 제거)
+    content = clean_content(content)
+
     # Step 5: 품질 검증
     step += 1
-    print(f"[{step}/5] 품질 검증 중...")
+    log(f"[{step}/{total_steps}] 품질 검증 중...")
     from core.forbidden_words import validate_content_quality
-    quality = validate_content_quality(content, keyword)
+    quality = validate_content_quality(content, seo_keyword or keyword)
 
     if quality["forbidden_words"]:
-        print(f"  ⚠ 금지어 {len(quality['forbidden_words'])}개 발견 → 자동 대체 중...")
+        log(f"  ⚠ 금지어 {len(quality['forbidden_words'])}개 발견 → 자동 대체 중...")
         from core.forbidden_words import auto_replace_forbidden
         content = auto_replace_forbidden(content)
 
     density = quality["keyword_density"]
-    print(f"  → 글자 수: {density['total_chars']:,}자 (공백 제외)")
-    print(f"  → 키워드 밀도: {density['density']:.1f}% ({density['count']}회)")
+    log(f"  → 글자 수: {density['total_chars']:,}자 (공백 제외)")
+    log(f"  → 키워드 밀도: {density['density']:.1f}% ({density['count']}회)")
 
     # 이미지 마커 추출
     image_markers = extract_image_markers(content)
-    print(f"  → 이미지 마커: {len(image_markers)}개")
+    log(f"  → 이미지 마커: {len(image_markers)}개")
+
+    # Step 6: 이미지 생성 (옵션)
+    images = []
+    if generate_images and image_markers:
+        step += 1
+        log(f"[{step}/{total_steps}] 이미지 생성 중... ({len(image_markers)}장)")
+        from core.image_generator import generate_all_images
+        images = await generate_all_images(
+            image_markers, keyword, blog_content=content,
+        )
+        log(f"  → {len(images)}/{len(image_markers)}장 생성 완료")
 
     return BlogPost(
         title=selected_title,
         content=content,
+        images=images,
         image_markers=image_markers,
+        formatting_theme=theme,
     )

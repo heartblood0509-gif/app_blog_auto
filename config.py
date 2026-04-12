@@ -21,8 +21,9 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL_GENERATION: str = "gemini-2.5-flash"
     GEMINI_MODEL_ANALYSIS: str = "gemini-2.5-pro"
+    GEMINI_IMAGE_MODEL: str = "gemini-3.1-flash-image-preview"
 
-    # Image Generation
+    # Image Generation (fallback)
     FAL_API_KEY: str = ""
     UNSPLASH_ACCESS_KEY: str = ""
 

@@ -17,6 +17,37 @@ class BlockType(Enum):
     IMAGE = "image"           # [이미지: 설명]
     QUOTE = "quote"           # 인용구 (> 또는 > 텍스트)
     BLANK = "blank"           # 빈 줄
+    HORIZONTAL_RULE = "hr"    # 구분선 (---)
+
+
+# 인용구 스타일 상수 (네이버 SmartEditor ONE 5종)
+QUOTE_STYLES = {
+    "default": "se-l-default",           # 큰따옴표 ("")
+    "bubble": "se-l-quotation_bubble",   # 말풍선
+    "line": "se-l-quotation_line",       # 세로선
+    "underline": "se-l-quotation_underline",  # 밑줄
+    "corner": "se-l-quotation_corner",   # 모서리 꺾쇠
+}
+
+
+@dataclass
+class TextSegment:
+    """인라인 텍스트 조각 (강조 여부 포함)"""
+    text: str
+    emphasis: bool = False
+
+
+def parse_emphasis(text: str) -> tuple[str, list[str]]:
+    """인라인 강조 마커 파싱: {강조}텍스트{/강조}
+
+    Returns:
+        (plain_text, emphasis_phrases)
+        - plain_text: 마커가 제거된 순수 텍스트
+        - emphasis_phrases: 강조할 문구 리스트
+    """
+    emphasis_phrases = re.findall(r'\{강조\}(.+?)\{/강조\}', text)
+    plain_text = re.sub(r'\{강조\}(.+?)\{/강조\}', r'\1', text)
+    return plain_text, emphasis_phrases
 
 
 @dataclass
@@ -25,6 +56,7 @@ class ContentBlock:
     text: str = ""
     level: int = 0          # heading level (2, 3 등)
     image_index: int = -1   # 이미지 인덱스
+    quote_style: str = "default"  # 인용구 스타일 (default/bubble/line/underline/corner)
 
 
 @dataclass
@@ -95,12 +127,32 @@ def parse_markdown(content: str) -> EditorSequence:
             image_count += 1
             continue
 
-        # 인용구
+        # 구분선 (--- 또는 ***)
+        if stripped in ("---", "***", "___"):
+            flush_paragraph()
+            blocks.append(ContentBlock(type=BlockType.HORIZONTAL_RULE))
+            continue
+
+        # 확장 인용구: >style> 텍스트 (예: >bubble> 말풍선 인용구)
+        quote_style_match = re.match(
+            r'^>(bubble|line|underline|corner)>\s+(.+)$', stripped
+        )
+        if quote_style_match:
+            flush_paragraph()
+            blocks.append(ContentBlock(
+                type=BlockType.QUOTE,
+                text=quote_style_match.group(2).strip(),
+                quote_style=quote_style_match.group(1),
+            ))
+            continue
+
+        # 기본 인용구 (> 텍스트)
         if stripped.startswith("> "):
             flush_paragraph()
             blocks.append(ContentBlock(
                 type=BlockType.QUOTE,
                 text=stripped[2:].strip(),
+                quote_style="default",
             ))
             continue
 
@@ -180,6 +232,11 @@ def sequence_to_plain_text(seq: EditorSequence) -> str:
         elif block.type == BlockType.IMAGE:
             parts.append(f"[이미지: {block.text}]")
         elif block.type == BlockType.QUOTE:
-            parts.append(f"> {block.text}")
+            if block.quote_style and block.quote_style != "default":
+                parts.append(f">{block.quote_style}> {block.text}")
+            else:
+                parts.append(f"> {block.text}")
+        elif block.type == BlockType.HORIZONTAL_RULE:
+            parts.append("---")
 
     return "\n".join(parts)

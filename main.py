@@ -21,10 +21,10 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QTextEdit, QPushButton, QComboBox,
     QGroupBox, QProgressBar, QFrame, QDialog, QDialogButtonBox,
-    QMessageBox,
+    QMessageBox, QCheckBox, QScrollArea, QGridLayout,
 )
-from PySide6.QtCore import Qt, Signal, QObject
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, Signal, QObject, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QFont, QPixmap
 
 from config import settings
 
@@ -96,14 +96,16 @@ QTextEdit {
 }
 QProgressBar {
     border: none;
-    border-radius: 5px;
+    border-radius: 10px;
     background: #E8E8E8;
-    height: 10px;
+    height: 20px;
     text-align: center;
-    font-size: 0px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #555;
 }
 QProgressBar::chunk {
-    border-radius: 5px;
+    border-radius: 10px;
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 #03C75A, stop:1 #00E676);
 }
@@ -115,6 +117,7 @@ class WorkerSignals(QObject):
     progress = Signal(int)
     finished = Signal(bool, str)
     content_ready = Signal(str, str)
+    images_ready = Signal(list, list)  # image_paths, image_markers
 
 
 class MainWindow(QMainWindow):
@@ -128,10 +131,14 @@ class MainWindow(QMainWindow):
         self.signals.progress.connect(self._update_progress)
         self.signals.finished.connect(self._on_finished)
         self.signals.content_ready.connect(self._on_content_ready)
+        self.signals.images_ready.connect(self._on_images_ready)
 
         self._generated_content = ""
         self._generated_title = ""
+        self._formatting_theme = {}
         self._is_running = False
+        self._pending_image_paths = []
+        self._pending_pipeline_args = None
 
         self._build_ui()
         self._load_saved_account()
@@ -180,14 +187,6 @@ class MainWindow(QMainWindow):
         acc_row1.addWidget(self.input_naver_pw, 1)
         acc_layout.addLayout(acc_row1)
 
-        acc_row2 = QHBoxLayout()
-        acc_row2.setSpacing(10)
-        acc_row2.addWidget(QLabel("블로그 ID"))
-        self.input_blog_id = QLineEdit(settings.NAVER_BLOG_ID)
-        self.input_blog_id.setPlaceholderText("블로그 ID (로그인 ID와 다르면 입력)")
-        acc_row2.addWidget(self.input_blog_id, 1)
-        acc_layout.addLayout(acc_row2)
-
         layout.addWidget(account_group)
 
         # ── 글 설정 ──
@@ -198,7 +197,9 @@ class MainWindow(QMainWindow):
         # 글 주제
         topic_row = QHBoxLayout()
         topic_row.setSpacing(10)
-        topic_row.addWidget(QLabel("글 주제"))
+        lbl_topic = QLabel("글 주제")
+        lbl_topic.setMinimumWidth(60)
+        topic_row.addWidget(lbl_topic)
         self.input_keyword = QLineEdit()
         self.input_keyword.setPlaceholderText("예: 탈모샴푸 후기, 크루즈여행 비용 비교...")
         topic_row.addWidget(self.input_keyword, 1)
@@ -207,7 +208,9 @@ class MainWindow(QMainWindow):
         # 키워드
         kw_row = QHBoxLayout()
         kw_row.setSpacing(10)
-        kw_row.addWidget(QLabel("키워드"))
+        lbl_kw = QLabel("키워드")
+        lbl_kw.setMinimumWidth(60)
+        kw_row.addWidget(lbl_kw)
         self.input_seo_keyword = QLineEdit()
         self.input_seo_keyword.setPlaceholderText("선택사항 — 예: 탈모샴푸, 크루즈여행경비 (SEO용)")
         kw_row.addWidget(self.input_seo_keyword, 1)
@@ -217,7 +220,9 @@ class MainWindow(QMainWindow):
         opt_row = QHBoxLayout()
         opt_row.setSpacing(10)
 
-        opt_row.addWidget(QLabel("글 스타일"))
+        lbl_style = QLabel("글 스타일")
+        lbl_style.setMinimumWidth(60)
+        opt_row.addWidget(lbl_style)
         self.combo_template = QComboBox()
         self.combo_template.addItems([
             "후기/경험담",
@@ -227,7 +232,9 @@ class MainWindow(QMainWindow):
         ])
         opt_row.addWidget(self.combo_template, 1)
 
-        opt_row.addWidget(QLabel("글자수"))
+        lbl_chars = QLabel("글자수")
+        lbl_chars.setMinimumWidth(60)
+        opt_row.addWidget(lbl_chars)
         self.combo_charcount = QComboBox()
         self.combo_charcount.addItems(["짧게 (500~1500)", "보통 (1500~2500)", "길게 (2500~3500)"])
         self.combo_charcount.setCurrentIndex(1)
@@ -238,25 +245,46 @@ class MainWindow(QMainWindow):
         # 제품 정보
         prod_row = QHBoxLayout()
         prod_row.setSpacing(10)
-        prod_row.addWidget(QLabel("제품명"))
+        lbl = QLabel("제품명")
+        lbl.setMinimumWidth(60)
+        prod_row.addWidget(lbl)
         self.input_product = QLineEdit()
         self.input_product.setPlaceholderText("선택사항 — 비워두면 순수 정보글")
         prod_row.addWidget(self.input_product, 1)
+        content_layout.addLayout(prod_row)
 
-        prod_row.addWidget(QLabel("장점"))
+        adv_row = QHBoxLayout()
+        adv_row.setSpacing(10)
+        lbl2 = QLabel("장점")
+        lbl2.setMinimumWidth(60)
+        adv_row.addWidget(lbl2)
         self.input_advantages = QLineEdit()
         self.input_advantages.setPlaceholderText("선택사항")
-        prod_row.addWidget(self.input_advantages, 1)
-        content_layout.addLayout(prod_row)
+        adv_row.addWidget(self.input_advantages, 1)
+        content_layout.addLayout(adv_row)
 
         # 추가 요구사항
         req_row = QHBoxLayout()
         req_row.setSpacing(10)
-        req_row.addWidget(QLabel("요구사항"))
+        lbl_req = QLabel("요구사항")
+        lbl_req.setMinimumWidth(60)
+        req_row.addWidget(lbl_req)
         self.input_requirements = QLineEdit()
         self.input_requirements.setPlaceholderText("선택사항 — 예: 20대 여성 타겟, 오프닝에 결론 먼저...")
         req_row.addWidget(self.input_requirements, 1)
         content_layout.addLayout(req_row)
+
+        # AI 이미지 생성 옵션
+        img_row = QHBoxLayout()
+        img_row.setSpacing(8)
+        self.chk_generate_images = QCheckBox("AI 이미지 생성")
+        self.chk_generate_images.setStyleSheet("font-size: 13px;")
+        img_row.addWidget(self.chk_generate_images)
+        img_cost_label = QLabel("이미지 1장당 약 90원 / 글 1편 약 630~900원")
+        img_cost_label.setStyleSheet("font-size: 11px; color: #999;")
+        img_row.addWidget(img_cost_label)
+        img_row.addStretch()
+        content_layout.addLayout(img_row)
 
         layout.addWidget(content_group)
 
@@ -310,11 +338,17 @@ class MainWindow(QMainWindow):
         self.btn_reset.hide()
         layout.addWidget(self.btn_reset)
 
-        # ── 프로그레스 ──
+        # ── 프로그레스 (부드러운 애니메이션) ──
         self.progress_bar = QProgressBar()
         self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("%p%")
         layout.addWidget(self.progress_bar)
+
+        # 프로그레스바 애니메이션
+        self._progress_anim = QPropertyAnimation(self.progress_bar, b"value")
+        self._progress_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._progress_anim.setDuration(600)  # 0.6초 동안 부드럽게 전환
 
         self.status_label = QLabel("")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -328,7 +362,7 @@ class MainWindow(QMainWindow):
         self.log_text.setReadOnly(True)
         self.log_text.setMinimumHeight(220)
         log_layout.addWidget(self.log_text)
-        layout.addWidget(log_group)
+        layout.addWidget(log_group, 1)
 
         # ── API 키 설정 버튼 ──
         self.btn_api_key = QPushButton("API 키 설정")
@@ -357,13 +391,10 @@ class MainWindow(QMainWindow):
             existing = self._load_env()
             naver_id = existing.get("NAVER_ID", "")
             naver_pw = existing.get("NAVER_PW", "")
-            blog_id = existing.get("NAVER_BLOG_ID", "")
             if naver_id and not self.input_naver_id.text():
                 self.input_naver_id.setText(naver_id)
             if naver_pw and not self.input_naver_pw.text():
                 self.input_naver_pw.setText(naver_pw)
-            if blog_id and not self.input_blog_id.text():
-                self.input_blog_id.setText(blog_id)
 
     def _get_template_id(self) -> str:
         return ["review", "informational", "brand-info", "brand-intro"][
@@ -424,13 +455,6 @@ class MainWindow(QMainWindow):
         pw_row.addWidget(input_naver_pw, 1)
         acc_layout.addLayout(pw_row)
 
-        blog_row = QHBoxLayout()
-        blog_row.addWidget(QLabel("블로그 ID"))
-        input_blog_id = QLineEdit(existing.get("NAVER_BLOG_ID", ""))
-        input_blog_id.setPlaceholderText("로그인 ID와 다르면 입력")
-        blog_row.addWidget(input_blog_id, 1)
-        acc_layout.addLayout(blog_row)
-
         dlg_layout.addWidget(acc_group)
 
         # API 키 설정
@@ -459,15 +483,12 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             naver_id = input_naver_id.text().strip()
             naver_pw = input_naver_pw.text().strip()
-            blog_id = input_blog_id.text().strip()
             gemini_key = input_gemini.text().strip()
 
             if naver_id:
                 existing["NAVER_ID"] = naver_id
             if naver_pw:
                 existing["NAVER_PW"] = naver_pw
-            if blog_id:
-                existing["NAVER_BLOG_ID"] = blog_id
             if gemini_key:
                 existing["GEMINI_API_KEY"] = gemini_key
 
@@ -479,8 +500,6 @@ class MainWindow(QMainWindow):
                 self.input_naver_id.setText(naver_id)
             if naver_pw:
                 self.input_naver_pw.setText(naver_pw)
-            if blog_id:
-                self.input_blog_id.setText(blog_id)
 
             QMessageBox.information(self, "저장 완료", "설정이 저장되었습니다.")
 
@@ -497,6 +516,7 @@ class MainWindow(QMainWindow):
         self.input_requirements.clear()
         self.combo_template.setCurrentIndex(0)
         self.combo_charcount.setCurrentIndex(1)
+        self._progress_anim.stop()
         self.progress_bar.setValue(0)
         self.status_label.setText("")
         self.status_label.setStyleSheet("font-size: 11px; color: #666;")
@@ -506,6 +526,8 @@ class MainWindow(QMainWindow):
         self.btn_start.setText("글 생성 → 블로그 자동 입력")
         self._generated_content = ""
         self._generated_title = ""
+        self._formatting_theme = {}
+        self.chk_generate_images.setChecked(False)
 
     def _on_start(self):
         topic = self.input_keyword.text().strip()
@@ -524,15 +546,17 @@ class MainWindow(QMainWindow):
         self._is_running = True
         self.btn_start.setEnabled(False)
         self.btn_start.setText("실행 중...")
+        self._progress_anim.stop()
         self.progress_bar.setValue(0)
         self.log_text.clear()
         self.status_label.setText("AI가 글을 생성하고 있습니다...")
 
-        blog_id = self.input_blog_id.text().strip() or naver_id
+        blog_id = naver_id
+        generate_images = self.chk_generate_images.isChecked()
 
         thread = threading.Thread(
             target=self._run_full_pipeline,
-            args=(topic, seo_keyword, naver_id, naver_pw, blog_id),
+            args=(topic, seo_keyword, naver_id, naver_pw, blog_id, generate_images),
             daemon=True,
         )
         thread.start()
@@ -541,19 +565,19 @@ class MainWindow(QMainWindow):
     # 파이프라인 (글 생성 → 자동 입력)
     # ------------------------------------------------------------------
 
-    def _run_full_pipeline(self, topic: str, seo_keyword: str, naver_id: str, naver_pw: str, blog_id: str):
+    def _run_full_pipeline(self, topic: str, seo_keyword: str, naver_id: str, naver_pw: str, blog_id: str, generate_images: bool = False):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
             loop.run_until_complete(
-                self._async_pipeline(topic, seo_keyword, naver_id, naver_pw, blog_id)
+                self._async_pipeline(topic, seo_keyword, naver_id, naver_pw, blog_id, generate_images)
             )
         except Exception as e:
             self.signals.finished.emit(False, f"오류: {e}")
         finally:
             loop.close()
 
-    async def _async_pipeline(self, topic: str, seo_keyword: str, naver_id: str, naver_pw: str, blog_id: str):
+    async def _async_pipeline(self, topic: str, seo_keyword: str, naver_id: str, naver_pw: str, blog_id: str, generate_images: bool = False):
 
         # ── STEP 1: 글 생성 ──
         self.signals.log.emit(f"━━━ STEP 1: 글 생성 ━━━")
@@ -576,14 +600,28 @@ class MainWindow(QMainWindow):
 
         self.signals.log.emit(f"스타일: {template} / 글자수: {char_range}")
 
+        # 글 생성 단계별 진행률 매핑
+        step_progress = {"1": 8, "2": 15, "3": 25, "4": 35, "5": 42, "6": 48}
+
+        def _on_gen_progress(msg: str):
+            self.signals.log.emit(msg)
+            # "[N/M]" 패턴에서 단계 번호 추출 → 진행률 업데이트
+            if msg.startswith("["):
+                step = msg.split("/")[0].replace("[", "").strip()
+                if step in step_progress:
+                    self.signals.progress.emit(step_progress[step])
+
         try:
             post = await generate_from_keyword(
                 keyword=topic,
+                seo_keyword=seo_keyword or None,
                 template=template,
                 product_name=product,
                 product_advantages=advantages,
                 requirements=requirements,
                 char_count_range=char_range,
+                generate_images=generate_images,
+                on_progress=_on_gen_progress,
             )
         except Exception as e:
             self.signals.finished.emit(False, f"글 생성 실패: {e}")
@@ -591,6 +629,7 @@ class MainWindow(QMainWindow):
 
         self._generated_content = post.content
         self._generated_title = post.title
+        self._formatting_theme = post.formatting_theme
 
         # 파일 저장
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -600,7 +639,26 @@ class MainWindow(QMainWindow):
 
         self.signals.log.emit(f"✓ 제목: {post.title}")
         self.signals.log.emit(f"✓ 저장: {save_path.name}")
-        self.signals.progress.emit(50)
+
+        # 이미지 저장
+        image_paths = []
+        if post.images:
+            from core.image_generator import save_images
+            image_paths = save_images(post.images, topic)
+            self.signals.log.emit(f"✓ 이미지: {len(image_paths)}장 저장")
+
+        self.signals.progress.emit(52)
+
+        # 이미지 미리보기 (이미지가 있으면 사용자 확인 대기)
+        if image_paths:
+            self.signals.log.emit("이미지 미리보기를 확인해주세요...")
+            self._pending_image_paths = image_paths
+            self._pending_pipeline_args = (naver_id, naver_pw, blog_id, image_paths)
+            self.signals.images_ready.emit(
+                [str(p) for p in image_paths],
+                post.image_markers[:len(image_paths)],
+            )
+            return  # 미리보기 확인 후 _continue_publish()에서 STEP 2 진행
 
         # ── STEP 2: 블로그 자동 입력 ──
         self.signals.log.emit(f"")
@@ -613,7 +671,7 @@ class MainWindow(QMainWindow):
         try:
             self.signals.log.emit("브라우저 실행 중...")
             page = await engine.launch()
-            self.signals.progress.emit(55)
+            self.signals.progress.emit(56)
 
             # 자동 로그인
             self.signals.log.emit("네이버 자동 로그인 중...")
@@ -624,7 +682,7 @@ class MainWindow(QMainWindow):
                 return
 
             self.signals.log.emit("✓ 로그인 성공")
-            self.signals.progress.emit(65)
+            self.signals.progress.emit(62)
 
             # 에디터 접속
             self.signals.log.emit("에디터 접속 중...")
@@ -640,16 +698,22 @@ class MainWindow(QMainWindow):
 
             await publisher._dismiss_popups(frame)
             self.signals.log.emit("✓ 에디터 로드 완료")
-            self.signals.progress.emit(70)
+            self.signals.progress.emit(68)
 
             # 글 입력
-            self.signals.log.emit("글 입력 시작...")
+            self.signals.log.emit(f"글 입력 시작... (이미지 {len(image_paths)}장 포함)")
+            self.signals.progress.emit(72)
             await publisher.publish(
                 blog_id=blog_id,
                 content_md=self._generated_content,
+                image_paths=image_paths if image_paths else None,
                 auto_publish=False,
+                formatting_theme=self._formatting_theme,
             )
 
+            self.signals.progress.emit(95)
+            self.signals.log.emit("✓ 글 입력 완료!")
+            await asyncio.sleep(0.5)
             self.signals.progress.emit(100)
             self.signals.finished.emit(
                 True,
@@ -666,13 +730,176 @@ class MainWindow(QMainWindow):
     def _append_log(self, msg: str):
         t = datetime.now().strftime("%H:%M:%S")
         self.log_text.append(f"<span style='color:#888'>[{t}]</span> {msg}")
+        # 자동 스크롤
+        scrollbar = self.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
 
     def _update_progress(self, value: int):
-        self.progress_bar.setValue(value)
+        self._progress_anim.stop()
+        self._progress_anim.setStartValue(self.progress_bar.value())
+        self._progress_anim.setEndValue(value)
+        self._progress_anim.start()
 
     def _on_content_ready(self, title: str, content: str):
         self._generated_title = title
         self._generated_content = content
+
+    def _on_images_ready(self, image_paths: list, image_markers: list):
+        """이미지 미리보기 팝업 표시"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("이미지 미리보기")
+        dialog.setMinimumSize(600, 500)
+        dlg_layout = QVBoxLayout(dialog)
+        dlg_layout.setSpacing(10)
+
+        info = QLabel(f"생성된 이미지 {len(image_paths)}장을 확인하세요. 확인 후 블로그에 입력됩니다.")
+        info.setStyleSheet("font-size: 13px; font-weight: bold;")
+        dlg_layout.addWidget(info)
+
+        # 스크롤 영역
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        grid = QGridLayout(scroll_widget)
+        grid.setSpacing(10)
+
+        for i, (path, desc) in enumerate(zip(image_paths, image_markers)):
+            # 이미지 썸네일
+            pixmap = QPixmap(path)
+            if not pixmap.isNull():
+                pixmap = pixmap.scaled(250, 160, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            img_label = QLabel()
+            img_label.setPixmap(pixmap)
+            img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            img_label.setStyleSheet("border: 1px solid #E0E0E0; border-radius: 6px; padding: 4px;")
+            grid.addWidget(img_label, i, 0)
+
+            # 이미지 설명
+            desc_label = QLabel(f"{i+1}. {desc}")
+            desc_label.setWordWrap(True)
+            desc_label.setStyleSheet("font-size: 11px; color: #555;")
+            grid.addWidget(desc_label, i, 1)
+
+        scroll.setWidget(scroll_widget)
+        dlg_layout.addWidget(scroll)
+
+        # 버튼
+        btn_layout = QHBoxLayout()
+        btn_confirm = QPushButton("블로그에 입력하기")
+        btn_confirm.setStyleSheet("""
+            QPushButton {
+                background: #03C75A; color: white; border: none;
+                border-radius: 8px; font-size: 13px; padding: 10px 24px;
+            }
+            QPushButton:hover { background: #02B350; }
+        """)
+        btn_skip = QPushButton("이미지 제외하고 입력")
+        btn_skip.setStyleSheet("""
+            QPushButton {
+                background: white; color: #666; border: 1px solid #D0D0D0;
+                border-radius: 8px; font-size: 13px; padding: 10px 24px;
+            }
+            QPushButton:hover { background: #F5F5F5; }
+        """)
+
+        btn_confirm.clicked.connect(lambda: dialog.done(1))
+        btn_skip.clicked.connect(lambda: dialog.done(2))
+        btn_layout.addWidget(btn_skip)
+        btn_layout.addWidget(btn_confirm)
+        dlg_layout.addLayout(btn_layout)
+
+        result = dialog.exec()
+
+        if result == 1:
+            # 이미지 포함하여 블로그 입력
+            use_images = [Path(p) for p in image_paths]
+        elif result == 2:
+            # 이미지 없이 블로그 입력
+            use_images = []
+        else:
+            # 취소
+            self.signals.finished.emit(False, "사용자가 취소했습니다.")
+            return
+
+        # STEP 2 진행 (별도 스레드)
+        args = self._pending_pipeline_args
+        if args:
+            naver_id, naver_pw, blog_id, _ = args
+            thread = threading.Thread(
+                target=self._run_publish_pipeline,
+                args=(naver_id, naver_pw, blog_id, use_images),
+                daemon=True,
+            )
+            thread.start()
+
+    def _run_publish_pipeline(self, naver_id: str, naver_pw: str, blog_id: str, image_paths: list):
+        """STEP 2: 블로그 자동 입력 (미리보기 확인 후)"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                self._async_publish(naver_id, naver_pw, blog_id, image_paths)
+            )
+        except Exception as e:
+            self.signals.finished.emit(False, f"오류: {e}")
+        finally:
+            loop.close()
+
+    async def _async_publish(self, naver_id: str, naver_pw: str, blog_id: str, image_paths: list):
+        """STEP 2: 블로그 자동 입력 비동기"""
+        self.signals.log.emit(f"")
+        self.signals.log.emit(f"━━━ STEP 2: 블로그 자동 입력 ━━━")
+
+        from bots.browser_engine import BrowserEngine
+        from bots.naver_blog_publisher import NaverBlogPublisher
+
+        engine = BrowserEngine()
+        try:
+            self.signals.log.emit("브라우저 실행 중...")
+            page = await engine.launch()
+            self.signals.progress.emit(55)
+
+            self.signals.log.emit("네이버 자동 로그인 중...")
+            logged_in = await engine.auto_login(naver_id, naver_pw)
+
+            if not logged_in:
+                self.signals.finished.emit(False, "로그인 실패. 아이디/비밀번호를 확인하세요.")
+                return
+
+            self.signals.log.emit("✓ 로그인 성공")
+            self.signals.progress.emit(65)
+
+            self.signals.log.emit("에디터 접속 중...")
+            editor_found = await engine.navigate_to_editor(blog_id)
+
+            if not editor_found:
+                self.signals.finished.emit(False, "에디터 페이지에 접근할 수 없습니다.")
+                return
+
+            publisher = NaverBlogPublisher(page)
+            frame = await publisher._wait_for_editor_frame(timeout=15)
+            await frame.wait_for_selector(".se-content", timeout=15000)
+            await publisher._dismiss_popups(frame)
+            self.signals.log.emit("✓ 에디터 로드 완료")
+            self.signals.progress.emit(70)
+
+            self.signals.log.emit(f"글 입력 시작... (이미지 {len(image_paths)}장 포함)")
+            await publisher.publish(
+                blog_id=blog_id,
+                content_md=self._generated_content,
+                image_paths=image_paths if image_paths else None,
+                auto_publish=False,
+                formatting_theme=self._formatting_theme,
+            )
+
+            self.signals.progress.emit(100)
+            self.signals.finished.emit(
+                True,
+                "완료! 브라우저에서 확인 후 발행 버튼을 눌러주세요."
+            )
+
+        except Exception as e:
+            self.signals.finished.emit(False, f"포스팅 실패: {e}")
 
     def _on_finished(self, success: bool, message: str):
         self._is_running = False

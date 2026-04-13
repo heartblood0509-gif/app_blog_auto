@@ -312,6 +312,26 @@ class NaverBlogPublisher:
         await asyncio.sleep(0.2)
         return False
 
+    async def _click_below_component(self, frame: Frame):
+        """현재 컴포넌트(이미지/구분선 등) 아래로 커서 이동"""
+        try:
+            content_area = await frame.query_selector('.se-content')
+            if content_area:
+                box = await content_area.bounding_box()
+                if box:
+                    click_x = box["x"] + box["width"] * 0.5
+                    click_y = box["y"] + box["height"] - 10
+                    await self.page.mouse.click(click_x, click_y)
+                    await asyncio.sleep(0.5)
+                    return
+        except Exception:
+            pass
+        # 폴백
+        for _ in range(3):
+            await self.page.keyboard.press("ArrowDown")
+            await asyncio.sleep(0.1)
+        await self.page.keyboard.press("End")
+
     async def _input_body(self, frame: Frame, blocks, image_paths: list[Path]):
         """본문 블록별 입력 — 가독성 패턴 적용
 
@@ -411,20 +431,9 @@ class NaverBlogPublisher:
                 const q = quotes[quotes.length - 1];
                 if (!q) return 'no quotation';
 
-                // 1. 컴포넌트 래퍼의 레이아웃 클래스 변경
+                // 컴포넌트 래퍼의 레이아웃 클래스만 변경 (이벤트 디스패치 금지!)
+                // change 이벤트를 보내면 SmartEditor가 재렌더링하며 텍스트가 초기화됨
                 q.className = q.className.replace(/se-l-[\\w]+/, '{target_class}');
-
-                // 2. data-layout 속성 업데이트 (SmartEditor 내부 상태)
-                q.setAttribute('data-layout', '{target_class}'.replace('se-l-', ''));
-
-                // 3. 내부 se-quotation 컨테이너 클래스도 동기화
-                const inner = q.querySelector('.se-quotation');
-                if (inner) {{
-                    inner.className = inner.className.replace(/se-quotation-[\\w]+/, 'se-quotation-{style}');
-                }}
-
-                // 4. 변경 이벤트 디스패치 (에디터 내부 상태 동기화)
-                q.dispatchEvent(new Event('change', {{bubbles: true}}));
 
                 return 'ok';
             }}
@@ -487,8 +496,6 @@ class NaverBlogPublisher:
             """)
 
             if result == 'ok':
-                # 인용구 스타일 변경
-                await self._change_quotation_style(frame, quote_style)
                 print(f"    ✓ 소제목(인용구/{quote_style}): {text[:30]}...")
             else:
                 print(f"    ⚠ 인용구 JS 삽입 실패({result}), 볼드 폴백")
@@ -503,9 +510,13 @@ class NaverBlogPublisher:
                 await self.page.keyboard.press("End")
                 await self.page.keyboard.press("Enter")
 
-            # 인용구 밖으로 나가기
+            # 인용구 밖으로 나가기 (먼저 exit → 그 다음 스타일 변경)
             await self._exit_quotation(frame)
             await asyncio.sleep(0.3)
+
+            # ★ 스타일 변경은 exit 후에 적용 (exit 전에 하면 SmartEditor가 텍스트 초기화)
+            if result == 'ok':
+                await self._change_quotation_style(frame, quote_style)
         else:
             # 폴백: 볼드 텍스트
             await self._human_type(text, delay_range=(5, 12))
@@ -589,15 +600,17 @@ class NaverBlogPublisher:
             """)
 
             if result == 'ok':
-                # 인용구 스타일 변경
-                await self._change_quotation_style(frame, quote_style)
                 print(f"    ✓ 인용구({quote_style}): {text[:30]}...")
             else:
                 print(f"    ⚠ 인용구 실패({result})")
 
-            # 인용구 밖으로 나가기
+            # 인용구 밖으로 나가기 (먼저 exit → 그 다음 스타일 변경)
             await self._exit_quotation(frame)
             await asyncio.sleep(0.3)
+
+            # ★ 스타일 변경은 exit 후에 적용
+            if result == 'ok':
+                await self._change_quotation_style(frame, quote_style)
         else:
             # 폴백
             await self._human_type(f"「 {text} 」", delay_range=(5, 12))
